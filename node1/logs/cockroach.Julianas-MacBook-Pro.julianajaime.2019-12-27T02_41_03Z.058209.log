@@ -1,0 +1,30 @@
+I191227 02:41:03.526483 1 util/log/clog.go:1196  [config] file created at: 2019/12/27 02:41:03
+I191227 02:41:03.526483 1 util/log/clog.go:1196  [config] running on machine: Julianas-MacBook-Pro
+I191227 02:41:03.526483 1 util/log/clog.go:1196  [config] binary: CockroachDB CCL v19.2.2 (x86_64-apple-darwin14, built 2019/12/11 01:27:47, go1.12.12)
+I191227 02:41:03.526483 1 util/log/clog.go:1196  [config] arguments: [cockroach start-single-node --certs-dir=certs --store=node1 --listen-addr=localhost:26257 --http-addr=localhost:8081]
+I191227 02:41:03.526483 1 util/log/clog.go:1196  line format: [IWEF]yymmdd hh:mm:ss.uuuuuu goid file:line msg utf8=✓
+I191227 02:41:03.526480 1 cli/start.go:1144  logging to directory /Users/julianajaime/go/src/server-info/node1/logs
+W191227 02:41:03.527416 1 cli/start.go:1052  Using the default setting for --cache (128 MiB).
+  A significantly larger value is usually needed for good performance.
+  If you have a dedicated server a reasonable setting is --cache=.25 (4.0 GiB).
+W191227 02:41:03.527495 1 cli/start.go:1065  Using the default setting for --max-sql-memory (128 MiB).
+  A significantly larger value is usually needed in production.
+  If you have a dedicated server a reasonable setting is --max-sql-memory=.25 (4.0 GiB).
+I191227 02:41:03.527538 1 cli/start.go:1196  CockroachDB CCL v19.2.2 (x86_64-apple-darwin14, built 2019/12/11 01:27:47, go1.12.12)
+I191227 02:41:03.636820 1 server/config.go:394  system total memory: 16 GiB
+I191227 02:41:03.636937 1 server/config.go:396  server configuration:
+max offset             500000000
+cache size             128 MiB
+SQL memory pool size   128 MiB
+scan interval          10m0s
+scan min idle time     10ms
+scan max idle time     1s
+event log enabled      true
+I191227 02:41:03.636974 1 cli/start.go:1030  using local environment variables: COCKROACH_BACKGROUND_RESTART=1
+I191227 02:41:03.637064 1 cli/start.go:1037  process identity: uid 501 euid 501 gid 20 egid 20
+I191227 02:41:03.637234 1 cli/start.go:644  starting cockroach node
+I191227 02:41:03.643047 54 base/addr_validation.go:296  [n?] server certificate addresses: IP=; DNS=localhost,Julianas-MacBook-Pro.local; CN=node
+I191227 02:41:03.643104 54 base/addr_validation.go:342  [n?] web UI certificate addresses: IP=; DNS=localhost,Julianas-MacBook-Pro.local; CN=node
+I191227 02:41:03.647281 54 storage/engine/rocksdb.go:622  opening rocksdb instance at "/Users/julianajaime/go/src/server-info/node1/cockroach-temp848280596"
+I191227 02:41:03.672833 54 server/server.go:928  [n?] monitoring forward clock jumps based on server.clock.forward_jump_check_enabled
+E191227 02:41:03.697540 1 cli/error.go:233  cockroach server exited with error: consider changing the port via --listen-addr: listen tcp 127.0.0.1:26257: bind: address already in use
