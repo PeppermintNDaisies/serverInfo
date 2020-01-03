@@ -134,7 +134,7 @@ func ServerInfo(w http.ResponseWriter, r *http.Request) {
 	for i := 0; i < len(endpoints); i++ {
 		statusMessage := endpoints[i].(map[string]interface{})["statusMessage"].(string)
 
-		for !strings.EqualFold(statusMessage, "READY") {
+		for !strings.EqualFold(statusMessage, "Ready") {
 			resp, err = http.Get(req)
 			if err != nil {
 				// handle error
@@ -155,7 +155,7 @@ func ServerInfo(w http.ResponseWriter, r *http.Request) {
 		ipAddress := endpoints[i].(map[string]interface{})["ipAddress"]
 
 		if (strings.EqualFold(sslGrade, "A+") && strings.Compare(grade.(string), sslGrade) < 0) ||
-			(!strings.EqualFold(sslGrade, "A+") && strings.Compare(grade.(string), sslGrade) > 0) {
+			(strings.Compare(grade.(string), sslGrade) > 0) {
 			sslGrade = grade.(string)
 		}
 		owner := "Not found"
@@ -207,16 +207,26 @@ func ServerInfo(w http.ResponseWriter, r *http.Request) {
 		servers[i] = server
 	}
 
+	fmt.Print(strings.Compare("A", "A+"))
+	fmt.Print(strings.Compare("B", "A+"))
+	fmt.Print(strings.Compare("B", "A"))
 	response.Servers = servers
 	response.SSLGrade = sslGrade
 
 	req = fmt.Sprintf("https://%s", domain)
-	resp, err = http.Get(req)
+
+	client := &http.Client{}
+	newReq, err := http.NewRequest("GET", req, nil)
+
+	newReq.Header.Add("User-Agent", "PostmanRuntime/7.21.0")
+	resp, err = client.Do(newReq)
+
 	if err != nil {
 		// handle error
 	}
 	defer resp.Body.Close()
 
+	fmt.Print(req)
 	if resp.Status == "503" {
 		response.IsDown = true
 	} else {
@@ -232,17 +242,29 @@ func ServerInfo(w http.ResponseWriter, r *http.Request) {
 	// Find the review items
 	doc.Find("title").Each(func(i int, s *goquery.Selection) {
 		// For each item found, get the band and title
+		fmt.Print(s.Text())
 		response.Title = s.Text()
 	})
 
 	doc.Find("link").Each(func(i int, s *goquery.Selection) {
 		// For each item found, get the band and title
-		attr, existsAttr := s.Attr("rel")
+		attr, existsAttr := s.Attr("type")
 
-		if existsAttr && strings.Contains(attr, "icon") {
+		if existsAttr && strings.Contains(attr, "image/x-icon") {
 			logo, existsLogo := s.Attr("href")
 			if existsLogo {
 				response.Logo = logo
+			}
+		}
+
+		if !existsAttr {
+			attr, existsAttr = s.Attr("rel")
+
+			if existsAttr && strings.Contains(attr, "icon") {
+				logo, existsLogo := s.Attr("href")
+				if existsLogo {
+					response.Logo = logo
+				}
 			}
 		}
 
