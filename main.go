@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
+	"github.com/goquery"
 	_ "github.com/lib/pq"
 )
 
@@ -27,7 +28,7 @@ type Info struct {
 	PreviousSSLGrade string    `json:"previous_ssl_grade"`
 	Logo             string    `json:"logo"`
 	Title            string    `json:"title"`
-	IsDown           string    `json:"is_down"`
+	IsDown           bool      `json:"is_down"`
 	Created          time.Time `json:"created_at"`
 }
 type Server struct {
@@ -37,9 +38,7 @@ type Server struct {
 	Owner    string `json:"owner"`
 }
 
-type SSLLabs struct {
-	Endpoints []json.RawMessage `json:"endpoints"`
-}
+var Grades = [7]string{"A+", "A", "B", "C", "D", "E", "F"}
 
 func init() {
 	router = chi.NewRouter()
@@ -104,36 +103,99 @@ func ServerInfo(w http.ResponseWriter, r *http.Request) {
 	var masnun map[string]interface{}
 	json.Unmarshal(body, &masnun)
 
+	status := masnun["status"].(string)
+
+	var response Info
+
+	for !strings.EqualFold(status, "READY") {
+		resp, err = http.Get(req)
+		if err != nil {
+			// handle error
+		}
+		defer resp.Body.Close()
+
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		json.Unmarshal(body, &masnun)
+
+		status = masnun["status"].(string)
+	}
+
 	var endpoints []interface{}
 	endpoints = masnun["endpoints"].([]interface{})
 
 	servers := make([]Server, len(endpoints))
 
+	sslGrade := "A+"
+
 	for i := 0; i < len(endpoints); i++ {
+		statusMessage := endpoints[i].(map[string]interface{})["statusMessage"].(string)
+
+		for !strings.EqualFold(statusMessage, "READY") {
+			resp, err = http.Get(req)
+			if err != nil {
+				// handle error
+			}
+			defer resp.Body.Close()
+
+			body, err = ioutil.ReadAll(resp.Body)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			json.Unmarshal(body, &masnun)
+
+			statusMessage = endpoints[i].(map[string]interface{})["statusMessage"].(string)
+		}
+
 		grade := endpoints[i].(map[string]interface{})["grade"]
 		ipAddress := endpoints[i].(map[string]interface{})["ipAddress"]
+
+		if (strings.EqualFold(sslGrade, "A+") && strings.Compare(grade.(string), sslGrade) < 0) ||
+			(!strings.EqualFold(sslGrade, "A+") && strings.Compare(grade.(string), sslGrade) > 0) {
+			sslGrade = grade.(string)
+		}
+		owner := "Not found"
+		country := "Not found"
 
 		cmd := "whois " + ipAddress.(string) + " | grep OrgName"
 		out, err := exec.Command("bash", "-c", cmd).Output()
 		if err != nil {
-			log.Fatalln(err)
+			cmd := "whois " + ipAddress.(string) + " | grep org-name"
+			out, err = exec.Command("bash", "-c", cmd).Output()
+			if err != nil {
+				cmd := "whois " + ipAddress.(string) + " | grep organisation"
+				out, err = exec.Command("bash", "-c", cmd).Output()
+				if err != nil {
+					//
+				}
+			}
 		}
 
 		ownerArr := strings.Split(string(out), ":")
-		owner := strings.ReplaceAll(ownerArr[1], " ", "")
+		owner = strings.ReplaceAll(ownerArr[1], " ", "")
 		owner = strings.ReplaceAll(owner, "\n", "")
-		log.Print(owner)
 
 		cmd = "whois " + ipAddress.(string) + " | grep Country"
 		out, err = exec.Command("bash", "-c", cmd).Output()
 		if err != nil {
-			log.Fatalln(err)
+			cmd = "whois " + ipAddress.(string) + " | grep country"
+			out, err = exec.Command("bash", "-c", cmd).Output()
+			if err != nil {
+				//
+			}
 		}
 
 		countryArr := strings.Split(string(out), ":")
-		country := strings.ReplaceAll(countryArr[1], " ", "")
+		country = strings.ReplaceAll(countryArr[1], " ", "")
 		country = strings.ReplaceAll(country, "\n", "")
-		log.Print(country)
+
+		if strings.EqualFold(owner, "RIPENCC") {
+			owner = "INFORMATION NOT AVAILABLE"
+		}
 
 		server := Server{
 			Address:  ipAddress.(string),
@@ -145,8 +207,51 @@ func ServerInfo(w http.ResponseWriter, r *http.Request) {
 		servers[i] = server
 	}
 
+	response.Servers = servers
+	response.SSLGrade = sslGrade
+
+	req = fmt.Sprintf("https://%s", domain)
+	resp, err = http.Get(req)
+	if err != nil {
+		// handle error
+	}
+	defer resp.Body.Close()
+
+	if resp.Status == "503" {
+		response.IsDown = true
+	} else {
+		response.IsDown = false
+	}
+
+	// Load the HTML document
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Find the review items
+	doc.Find("title").Each(func(i int, s *goquery.Selection) {
+		// For each item found, get the band and title
+		response.Title = s.Text()
+	})
+
+	doc.Find("link").Each(func(i int, s *goquery.Selection) {
+		// For each item found, get the band and title
+		attr, existsAttr := s.Attr("rel")
+
+		if existsAttr && strings.Contains(attr, "icon") {
+			logo, existsLogo := s.Attr("href")
+			if existsLogo {
+				response.Logo = logo
+			}
+		}
+
+	})
+
+	response.Created = time.Now()
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(servers)
+	json.NewEncoder(w).Encode(response)
 }
 
 func main() {
