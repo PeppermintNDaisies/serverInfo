@@ -44,22 +44,12 @@ type Info struct {
 	Updated          time.Time `json:"updated_at"`
 }
 
-type ServerDB struct {
-	Id       uuid.UUID `json:"id"`
-	Address  string    `json:"address"`
-	SSLGrade string    `json:"ssl_grade"`
-	Country  string    `json:"country"`
-	Owner    string    `json:"owner"`
-}
-
 type Server struct {
 	Address  string `json:"address"`
 	SSLGrade string `json:"ssl_grade"`
 	Country  string `json:"country"`
 	Owner    string `json:"owner"`
 }
-
-var Grades = [7]string{"A+", "A", "B", "C", "D", "E", "F"}
 
 func init() {
 	router = chi.NewRouter()
@@ -85,10 +75,11 @@ func routers() *chi.Mux {
 // CreatePost create a new post
 func AllServers(w http.ResponseWriter, r *http.Request) {
 
-	var response []ServerInfo
+	var response Items
+	var allInfo []ServerInfo
 
 	rows, err := db.Query(
-		"SELECT id, domain, servers_changed, ssl_grade, previous_ssl_grade, logo, title, is_down, created, updated FROM serverInfo")
+		"SELECT id, domain, servers_changed, ssl_grade, previous_ssl_grade, logo, title, is_down, created_at, updated_at FROM serverInfo")
 	catch(err)
 
 	defer rows.Close()
@@ -97,7 +88,6 @@ func AllServers(w http.ResponseWriter, r *http.Request) {
 
 		var responseInfo Info
 		var serverInfo ServerInfo
-		var servers []Server
 
 		// Print out the returned values.
 		var id uuid.UUID
@@ -130,50 +120,15 @@ func AllServers(w http.ResponseWriter, r *http.Request) {
 				responseInfo.Updated = updatedAtDB.Time
 			}
 
-			rows, err := db.Query("Select server_id From servers_info WHERE info_id=$1 ", id)
-			catch(err)
-
-			defer rows.Close()
-
-			for rows.Next() {
-				var serverID uuid.UUID
-
-				er := rows.Scan(&serverID)
-
-				if er != nil {
-					log.Print(er)
-				}
-
-				var server Server
-
-				row := db.QueryRow(
-					"SELECT id, ipaddress, ssl_grade, country, owner FROM servers WHERE id=$1 ", serverID)
-
-				// Print out the returned values.
-				var id uuid.UUID
-				var addressDB, sslGradeDB, country, owner string
-
-				if err := row.Scan(&id, &addressDB, &sslGradeDB, &country, &owner); err != nil {
-					log.Print(err)
-				}
-
-				if row != nil {
-					server.Address = addressDB
-					server.SSLGrade = sslGradeDB
-					server.Country = country
-					server.Owner = owner
-				}
-
-				servers = append(servers, server)
-
-			}
+			servers, _ := lookUpServersDB(id)
 			responseInfo.Servers = servers
 			serverInfo.Info = responseInfo
 
 		}
-		response = append(response, serverInfo)
+		allInfo = append(allInfo, serverInfo)
 	}
 
+	response.Items = allInfo
 	w.WriteHeader(http.StatusCreated)
 
 	json.NewEncoder(w).Encode(response)
@@ -185,21 +140,20 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 	domain := chi.URLParam(r, "domain")
 
 	row := db.QueryRow(
-		"SELECT id, servers_changed, ssl_grade, previous_ssl_grade, logo, title, is_down, created, updated FROM serverInfo WHERE domain=$1 ", domain)
+		"SELECT id, servers_changed, ssl_grade, previous_ssl_grade, logo, title, is_down, created_at, updated_at FROM serverInfo WHERE domain=$1 ", domain)
 
 	var response Info
-	var servers []Server
 
 	// Print out the returned values.
 	var id uuid.UUID
 	var serversChangedDB sql.NullBool
 	var sslGradeDB string
 	var previousSslGradeDB, logo, title sql.NullString
-	var isDown bool
+	var isDownDB bool
 	var createdAtDB time.Time
 	var updatedAtDB pq.NullTime
 
-	if err := row.Scan(&id, &serversChangedDB, &sslGradeDB, &previousSslGradeDB, &logo, &title, &isDown, &createdAtDB, &updatedAtDB); err != nil {
+	if err := row.Scan(&id, &serversChangedDB, &sslGradeDB, &previousSslGradeDB, &logo, &title, &isDownDB, &createdAtDB, &updatedAtDB); err != nil {
 		response = searchInfo(domain, response)
 	} else {
 
@@ -213,51 +167,48 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 		if title.Valid {
 			response.Title = title.String
 		}
+
+		_, _, isDown := lookUpWebInfo(domain)
 		response.IsDown = isDown
+
 		response.Created = createdAtDB
 		if updatedAtDB.Valid {
 			response.Updated = updatedAtDB.Time
 		}
 
-		rows, err := db.Query("Select server_id From servers_info WHERE info_id=$1 ", id)
-		catch(err)
+		serversDB, serverIDs := lookUpServersDB(id)
+		response.Servers = serversDB
+		now := time.Now()
 
-		defer rows.Close()
+		var timePassed time.Duration
+		if !updatedAtDB.Valid {
+			created := time.Date(createdAtDB.Year(), createdAtDB.Month(), createdAtDB.Day(), createdAtDB.Hour(), createdAtDB.Minute(), createdAtDB.Second(), createdAtDB.Nanosecond(), now.Location())
+			timePassed = now.Sub(created)
+		} else {
+			updated := time.Date(updatedAtDB.Time.Year(), updatedAtDB.Time.Month(), updatedAtDB.Time.Day(), updatedAtDB.Time.Hour(), updatedAtDB.Time.Minute(), updatedAtDB.Time.Second(), updatedAtDB.Time.Nanosecond(), now.Location())
+			timePassed = now.Sub(updated)
+		}
 
-		for rows.Next() {
-			var serverID uuid.UUID
+		if timePassed.Hours() >= 1 {
+			serversSSL, _, sslGrade := lookUpServersSSL(domain)
 
-			er := rows.Scan(&serverID)
+			if !strings.EqualFold(sslGrade, sslGradeDB) {
+				response.ServersChanged = true
+				response.PreviousSSLGrade = sslGradeDB
+				response.SSLGrade = sslGrade
+				response.Servers = serversSSL
 
-			if er != nil {
-				log.Print(er)
+				updateServerInfo(serversSSL, serverIDs)
+				updateInfo(response, id)
+			} else {
+				if response.ServersChanged {
+					response.ServersChanged = false
+					updateInfo(response, id)
+				}
 			}
-
-			var server Server
-
-			row := db.QueryRow(
-				"SELECT id, ipaddress, ssl_grade, country, owner FROM servers WHERE id=$1 ", serverID)
-
-			// Print out the returned values.
-			var id uuid.UUID
-			var addressDB, sslGradeDB, country, owner string
-
-			if err := row.Scan(&id, &addressDB, &sslGradeDB, &country, &owner); err != nil {
-				log.Print(err)
-			}
-
-			if row != nil {
-				server.Address = addressDB
-				server.SSLGrade = sslGradeDB
-				server.Country = country
-				server.Owner = owner
-			}
-
-			servers = append(servers, server)
 
 		}
 
-		response.Servers = servers
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -272,6 +223,23 @@ func main() {
 
 func searchInfo(domain string, response Info) Info {
 	log.Print("Search")
+
+	title, logo, isDown := lookUpWebInfo(domain)
+	servers, serverIDs, sslGrade := lookUpServersSSL(domain)
+
+	response.Servers = servers
+	response.SSLGrade = sslGrade
+	response.Title = title
+	response.Logo = logo
+	response.IsDown = isDown
+	response.Created = time.Now()
+
+	persistInfo(domain, response, serverIDs)
+
+	return response
+}
+
+func lookUpServersSSL(domain string) ([]Server, []uuid.UUID, string) {
 	req := fmt.Sprintf("https://api.ssllabs.com/api/v3/analyze?host=%s", domain)
 
 	resp, err := http.Get(req)
@@ -342,53 +310,9 @@ func searchInfo(domain string, response Info) Info {
 			(strings.Compare(grade.(string), sslGrade) > 0) {
 			sslGrade = grade.(string)
 		}
-		owner := "Not found"
-		country := "Not found"
 
-		cmd := "whois " + ipAddress.(string) + " | grep OrgName"
-		out, err := exec.Command("bash", "-c", cmd).Output()
-		if err != nil {
-			cmd := "whois " + ipAddress.(string) + " | grep org-name"
-			out, err = exec.Command("bash", "-c", cmd).Output()
-			if err != nil {
-				cmd := "whois " + ipAddress.(string) + " | grep organisation"
-				out, err = exec.Command("bash", "-c", cmd).Output()
-				if err != nil {
-					//
-				}
-			}
-		}
+		owner, country := lookUpWhoisInfo(ipAddress.(string))
 
-		ownerArr := strings.Split(string(out), ":")
-		owner = strings.ReplaceAll(ownerArr[1], " ", "")
-		owner = strings.ReplaceAll(owner, "\n", "")
-
-		cmd = "whois " + ipAddress.(string) + " | grep Country"
-		out, err = exec.Command("bash", "-c", cmd).Output()
-		if err != nil {
-			cmd = "whois " + ipAddress.(string) + " | grep country"
-			out, err = exec.Command("bash", "-c", cmd).Output()
-			if err != nil {
-				//
-			}
-		}
-
-		countryArr := strings.Split(string(out), ":")
-		country = strings.ReplaceAll(countryArr[1], " ", "")
-		country = strings.ReplaceAll(country, "\n", "")
-
-		if strings.EqualFold(owner, "RIPENCC") {
-			owner = "INFORMATION NOT AVAILABLE"
-		}
-
-		id, err := uuid.NewUUID()
-		if err != nil {
-			log.Print(err)
-		}
-		serverIDs = append(serverIDs, id)
-
-		log.Print("id created ", id)
-		log.Print(serverIDs)
 		server := Server{
 			Address:  ipAddress.(string),
 			SSLGrade: grade.(string),
@@ -396,26 +320,116 @@ func searchInfo(domain string, response Info) Info {
 			Country:  country,
 		}
 
-		if _, err := db.Query(
-			"INSERT INTO servers (ipAddress, ssl_grade, country, owner, id) "+
-				"VALUES ($1, $2, $3, $4, $5) ",
-			server.Address, server.SSLGrade, server.Country, server.Owner, id); err != nil {
-			log.Fatal(err)
-		}
+		serverIDs = append(serverIDs, persistServerInfo(server))
 
 		servers[i] = server
 	}
 
-	response.Servers = servers
-	response.SSLGrade = sslGrade
+	return servers, serverIDs, sslGrade
+}
 
-	req = fmt.Sprintf("https://%s", domain)
+func lookUpServersDB(id uuid.UUID) ([]Server, []uuid.UUID) {
+
+	var servers []Server
+	var ids []uuid.UUID
+
+	rows, err := db.Query("Select server_id From servers_info WHERE info_id=$1 ", id)
+	catch(err)
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var serverID uuid.UUID
+
+		er := rows.Scan(&serverID)
+
+		if er != nil {
+			log.Print(er)
+		}
+
+		ids = append(ids, serverID)
+
+		var server Server
+
+		row := db.QueryRow(
+			"SELECT id, ipaddress, ssl_grade, country, owner FROM servers WHERE id=$1 ", serverID)
+
+		// Print out the returned values.
+		var id uuid.UUID
+		var addressDB, sslGradeDB, country, owner string
+
+		if err := row.Scan(&id, &addressDB, &sslGradeDB, &country, &owner); err != nil {
+			log.Print(err)
+		}
+
+		server.Address = addressDB
+		server.SSLGrade = sslGradeDB
+		server.Country = country
+		server.Owner = owner
+
+		servers = append(servers, server)
+
+	}
+
+	return servers, ids
+}
+
+func lookUpWhoisInfo(ipAddress string) (string, string) {
+	owner := "Not found"
+	country := "Not found"
+
+	cmd := "whois " + ipAddress + " | grep OrgName"
+	out, err := exec.Command("bash", "-c", cmd).Output()
+	if err != nil {
+		cmd := "whois " + ipAddress + " | grep org-name"
+		out, err = exec.Command("bash", "-c", cmd).Output()
+		if err != nil {
+			cmd := "whois " + ipAddress + " | grep organisation"
+			out, err = exec.Command("bash", "-c", cmd).Output()
+			if err != nil {
+				//
+			}
+		}
+	}
+
+	ownerArr := strings.Split(string(out), ":")
+	owner = strings.ReplaceAll(ownerArr[1], " ", "")
+	owner = strings.ReplaceAll(owner, "\n", "")
+
+	cmd = "whois " + ipAddress + " | grep Country"
+	out, err = exec.Command("bash", "-c", cmd).Output()
+	if err != nil {
+		cmd = "whois " + ipAddress + " | grep country"
+		out, err = exec.Command("bash", "-c", cmd).Output()
+		if err != nil {
+			//
+		}
+	}
+
+	countryArr := strings.Split(string(out), ":")
+	country = strings.ReplaceAll(countryArr[1], " ", "")
+	country = strings.ReplaceAll(country, "\n", "")
+
+	if strings.EqualFold(owner, "RIPENCC") {
+		owner = "INFORMATION NOT AVAILABLE"
+	}
+
+	return owner, country
+}
+
+func lookUpWebInfo(domain string) (string, string, bool) {
+
+	var title string
+	var logo string
+	var isDown bool
+
+	req := fmt.Sprintf("https://%s", domain)
 
 	client := &http.Client{}
 	newReq, err := http.NewRequest("GET", req, nil)
 
 	newReq.Header.Add("User-Agent", "PostmanRuntime/7.21.0")
-	resp, err = client.Do(newReq)
+	resp, err := client.Do(newReq)
 
 	if err != nil {
 		// handle error
@@ -424,9 +438,9 @@ func searchInfo(domain string, response Info) Info {
 
 	fmt.Print(req)
 	if resp.Status == "503" {
-		response.IsDown = true
+		isDown = true
 	} else {
-		response.IsDown = false
+		isDown = false
 	}
 
 	// Load the HTML document
@@ -435,11 +449,10 @@ func searchInfo(domain string, response Info) Info {
 		log.Fatal(err)
 	}
 
-	// Find the review items
 	doc.Find("title").EachWithBreak(func(i int, s *goquery.Selection) bool {
 		// For each item found, get the band and title
 		fmt.Print(s.Text())
-		response.Title = s.Text()
+		title = s.Text()
 		return false
 	})
 
@@ -448,9 +461,9 @@ func searchInfo(domain string, response Info) Info {
 		attr, existsAttr := s.Attr("type")
 
 		if existsAttr && strings.Contains(attr, "image/x-icon") {
-			logo, existsLogo := s.Attr("href")
+			logoStr, existsLogo := s.Attr("href")
 			if existsLogo {
-				response.Logo = logo
+				logo = logoStr
 				return
 			}
 		}
@@ -459,9 +472,9 @@ func searchInfo(domain string, response Info) Info {
 			attr, existsAttr = s.Attr("rel")
 
 			if existsAttr && strings.Contains(attr, "icon") {
-				logo, existsLogo := s.Attr("href")
+				logoStr, existsLogo := s.Attr("href")
 				if existsLogo {
-					response.Logo = logo
+					logo = logoStr
 					return
 				}
 			}
@@ -469,15 +482,17 @@ func searchInfo(domain string, response Info) Info {
 
 	})
 
-	response.Created = time.Now()
+	return title, logo, isDown
+}
 
+func persistInfo(domain string, response Info, serverIDs []uuid.UUID) {
 	id, err := uuid.NewUUID()
 	if err != nil {
 		log.Print(err)
 	}
 
 	if _, err := db.Query(
-		"INSERT INTO serverInfo (domain, ssl_grade, logo, title, is_down, created, id ) "+
+		"INSERT INTO serverInfo (domain, ssl_grade, logo, title, is_down, created_at, id ) "+
 			"VALUES ($1, $2, $3, $4, $5, $6, $7) ",
 		domain, response.SSLGrade, response.Logo, response.Title, response.IsDown, time.Now(), id); err != nil {
 		log.Fatal(err)
@@ -496,6 +511,72 @@ func searchInfo(domain string, response Info) Info {
 			log.Fatal(err)
 		}
 	}
+}
 
-	return response
+func persistServerInfo(server Server) uuid.UUID {
+	id, err := uuid.NewUUID()
+	if err != nil {
+		log.Print(err)
+	}
+
+	if _, err := db.Query(
+		"INSERT INTO servers (ipAddress, ssl_grade, country, owner, id) "+
+			"VALUES ($1, $2, $3, $4, $5) ",
+		server.Address, server.SSLGrade, server.Country, server.Owner, id); err != nil {
+		log.Fatal(err)
+	}
+
+	return id
+}
+
+func updateServerInfo(servers []Server, ids []uuid.UUID) {
+
+	if len(servers) > len(ids) {
+		for i, id := range ids {
+			server := servers[i]
+			if _, err := db.Query(
+				"UPDATE servers SET (ipAddress, ssl_grade, country, owner) = "+
+					" ($1, $2, $3, $4) WHERE id = $5",
+				server.Address, server.SSLGrade, server.Country, server.Owner, id); err != nil {
+				log.Fatal(err)
+			}
+			if i > len(ids) {
+				break
+			}
+		}
+	} else if len(servers) < len(ids) {
+		for i, server := range servers {
+
+			if _, err := db.Query(
+				"UPDATE servers SET (ipAddress, ssl_grade, country, owner) = "+
+					" ($1, $2, $3, $4) WHERE id = $5",
+				server.Address, server.SSLGrade, server.Country, server.Owner, ids[i]); err != nil {
+				log.Fatal(err)
+			}
+			if i > len(servers) {
+				break
+			}
+		}
+	} else {
+		for i, server := range servers {
+			if _, err := db.Query(
+				"UPDATE servers SET (ipAddress, ssl_grade, country, owner) = "+
+					" ($1, $2, $3, $4) WHERE id = $5",
+				server.Address, server.SSLGrade, server.Country, server.Owner, ids[i]); err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+
+}
+
+func updateInfo(response Info, id uuid.UUID) {
+
+	if _, err := db.Query(
+		"UPDATE serverInfo SET ( servers_changed, ssl_grade, previous_ssl_grade, updated_at ) = "+
+			" ($1, $2, $3, $4) WHERE id = $5",
+		response.ServersChanged, response.SSLGrade, response.PreviousSSLGrade, time.Now(), id); err != nil {
+		log.Fatal(err)
+	}
+
 }
