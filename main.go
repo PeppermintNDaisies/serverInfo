@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/middleware"
 	"github.com/google/uuid"
 	"github.com/goquery"
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 )
 
@@ -22,9 +23,18 @@ var router *chi.Mux
 var db *sql.DB
 
 // Post type details
+type Items struct {
+	Items []ServerInfo `json:"items"`
+}
+
+type ServerInfo struct {
+	Domain string `json:"domain"`
+	Info   Info   `json:"info"`
+}
+
 type Info struct {
 	Servers          []Server  `json:"servers"`
-	ServersChanged   string    `json:"servers_changed"`
+	ServersChanged   bool      `json:"servers_changed"`
 	SSLGrade         string    `json:"ssl_grade"`
 	PreviousSSLGrade string    `json:"previous_ssl_grade"`
 	Logo             string    `json:"logo"`
@@ -34,12 +44,19 @@ type Info struct {
 	Updated          time.Time `json:"updated_at"`
 }
 
-type Server struct {
+type ServerDB struct {
 	Id       uuid.UUID `json:"id"`
 	Address  string    `json:"address"`
 	SSLGrade string    `json:"ssl_grade"`
 	Country  string    `json:"country"`
 	Owner    string    `json:"owner"`
+}
+
+type Server struct {
+	Address  string `json:"address"`
+	SSLGrade string `json:"ssl_grade"`
+	Country  string `json:"country"`
+	Owner    string `json:"owner"`
 }
 
 var Grades = [7]string{"A+", "A", "B", "C", "D", "E", "F"}
@@ -57,8 +74,8 @@ func init() {
 
 func routers() *chi.Mux {
 
-	router.Post("/servers", DetailPost)
-	router.Get("/serverinfo/{domain}", ServerInfo)
+	router.Get("/servers", AllServers)
+	router.Get("/serverinfo/{domain}", GetServerInfo)
 
 	return router
 }
@@ -66,24 +83,104 @@ func routers() *chi.Mux {
 //-------------- API ENDPOINT ------------------//
 
 // CreatePost create a new post
-func DetailPost(w http.ResponseWriter, r *http.Request) {
+func AllServers(w http.ResponseWriter, r *http.Request) {
 
-	var server Server
-	reqBody, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		fmt.Fprintf(w, "Kindly enter data with the event title and description only in order to update")
+	var response []ServerInfo
+
+	rows, err := db.Query(
+		"SELECT id, domain, servers_changed, ssl_grade, previous_ssl_grade, logo, title, is_down, created, updated FROM serverInfo")
+	catch(err)
+
+	defer rows.Close()
+
+	for rows.Next() {
+
+		var responseInfo Info
+		var serverInfo ServerInfo
+		var servers []Server
+
+		// Print out the returned values.
+		var id uuid.UUID
+		var domain, sslGradeDB string
+		var serversChangedDB sql.NullBool
+		var previousSslGradeDB, logo, title sql.NullString
+		var isDown bool
+		var createdAtDB time.Time
+		var updatedAtDB pq.NullTime
+
+		if err := rows.Scan(&id, &domain, &serversChangedDB, &sslGradeDB, &previousSslGradeDB, &logo, &title, &isDown, &createdAtDB, &updatedAtDB); err != nil {
+			log.Print(err)
+		} else {
+
+			serverInfo.Domain = domain
+
+			responseInfo.SSLGrade = sslGradeDB
+			if previousSslGradeDB.Valid {
+				responseInfo.PreviousSSLGrade = previousSslGradeDB.String
+			}
+			if logo.Valid {
+				responseInfo.Logo = logo.String
+			}
+			if title.Valid {
+				responseInfo.Title = title.String
+			}
+			responseInfo.IsDown = isDown
+			responseInfo.Created = createdAtDB
+			if updatedAtDB.Valid {
+				responseInfo.Updated = updatedAtDB.Time
+			}
+
+			rows, err := db.Query("Select server_id From servers_info WHERE info_id=$1 ", id)
+			catch(err)
+
+			defer rows.Close()
+
+			for rows.Next() {
+				var serverID uuid.UUID
+
+				er := rows.Scan(&serverID)
+
+				if er != nil {
+					log.Print(er)
+				}
+
+				var server Server
+
+				row := db.QueryRow(
+					"SELECT id, ipaddress, ssl_grade, country, owner FROM servers WHERE id=$1 ", serverID)
+
+				// Print out the returned values.
+				var id uuid.UUID
+				var addressDB, sslGradeDB, country, owner string
+
+				if err := row.Scan(&id, &addressDB, &sslGradeDB, &country, &owner); err != nil {
+					log.Print(err)
+				}
+
+				if row != nil {
+					server.Address = addressDB
+					server.SSLGrade = sslGradeDB
+					server.Country = country
+					server.Owner = owner
+				}
+
+				servers = append(servers, server)
+
+			}
+			responseInfo.Servers = servers
+			serverInfo.Info = responseInfo
+
+		}
+		response = append(response, serverInfo)
 	}
-
-	json.Unmarshal(reqBody, &server)
-	log.Print(server)
 
 	w.WriteHeader(http.StatusCreated)
 
-	json.NewEncoder(w).Encode(server)
+	json.NewEncoder(w).Encode(response)
 }
 
 // Get server information from domain entered by user
-func ServerInfo(w http.ResponseWriter, r *http.Request) {
+func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 
 	domain := chi.URLParam(r, "domain")
 
@@ -93,27 +190,34 @@ func ServerInfo(w http.ResponseWriter, r *http.Request) {
 	var response Info
 	var servers []Server
 
-	var unUsedID uuid.UUID
 	// Print out the returned values.
 	var id uuid.UUID
-	var serversChangedDB, sslGradeDB, previousSslGradeDB, logo, title string
-	var isDownDB bool
-	var createdAtDB, updatedAtDB time.Time
+	var serversChangedDB sql.NullBool
+	var sslGradeDB string
+	var previousSslGradeDB, logo, title sql.NullString
+	var isDown bool
+	var createdAtDB time.Time
+	var updatedAtDB pq.NullTime
 
-	if err := row.Scan(&id, &serversChangedDB, &sslGradeDB, &previousSslGradeDB, &logo, &title, &isDownDB, &createdAtDB, &updatedAtDB); err != nil {
+	if err := row.Scan(&id, &serversChangedDB, &sslGradeDB, &previousSslGradeDB, &logo, &title, &isDown, &createdAtDB, &updatedAtDB); err != nil {
 		response = searchInfo(domain, response)
-		log.Print(err)
-	}
-	log.Print(id)
-	if id != unUsedID {
-		log.Print("row not nil")
-		response.ServersChanged = serversChangedDB
+	} else {
+
 		response.SSLGrade = sslGradeDB
-		response.PreviousSSLGrade = previousSslGradeDB
-		response.Logo = logo
-		response.Title = title
-		response.IsDown = isDownDB
+		if previousSslGradeDB.Valid {
+			response.PreviousSSLGrade = previousSslGradeDB.String
+		}
+		if logo.Valid {
+			response.Logo = logo.String
+		}
+		if title.Valid {
+			response.Title = title.String
+		}
+		response.IsDown = isDown
 		response.Created = createdAtDB
+		if updatedAtDB.Valid {
+			response.Updated = updatedAtDB.Time
+		}
 
 		rows, err := db.Query("Select server_id From servers_info WHERE info_id=$1 ", id)
 		catch(err)
@@ -154,11 +258,11 @@ func ServerInfo(w http.ResponseWriter, r *http.Request) {
 		}
 
 		response.Servers = servers
-
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+
 }
 
 func main() {
@@ -167,6 +271,7 @@ func main() {
 }
 
 func searchInfo(domain string, response Info) Info {
+	log.Print("Search")
 	req := fmt.Sprintf("https://api.ssllabs.com/api/v3/analyze?host=%s", domain)
 
 	resp, err := http.Get(req)
@@ -206,6 +311,7 @@ func searchInfo(domain string, response Info) Info {
 	endpoints = masnun["endpoints"].([]interface{})
 
 	servers := make([]Server, len(endpoints))
+	serverIDs := make([]uuid.UUID, 0)
 
 	sslGrade := "A+"
 
@@ -279,9 +385,11 @@ func searchInfo(domain string, response Info) Info {
 		if err != nil {
 			log.Print(err)
 		}
+		serverIDs = append(serverIDs, id)
 
+		log.Print("id created ", id)
+		log.Print(serverIDs)
 		server := Server{
-			Id:       id,
 			Address:  ipAddress.(string),
 			SSLGrade: grade.(string),
 			Owner:    owner,
@@ -291,7 +399,7 @@ func searchInfo(domain string, response Info) Info {
 		if _, err := db.Query(
 			"INSERT INTO servers (ipAddress, ssl_grade, country, owner, id) "+
 				"VALUES ($1, $2, $3, $4, $5) ",
-			server.Address, server.SSLGrade, server.Country, server.Owner, server.Id); err != nil {
+			server.Address, server.SSLGrade, server.Country, server.Owner, id); err != nil {
 			log.Fatal(err)
 		}
 
@@ -328,10 +436,11 @@ func searchInfo(domain string, response Info) Info {
 	}
 
 	// Find the review items
-	doc.Find("title").Each(func(i int, s *goquery.Selection) {
+	doc.Find("title").EachWithBreak(func(i int, s *goquery.Selection) bool {
 		// For each item found, get the band and title
 		fmt.Print(s.Text())
 		response.Title = s.Text()
+		return false
 	})
 
 	doc.Find("link").Each(func(i int, s *goquery.Selection) {
@@ -342,6 +451,7 @@ func searchInfo(domain string, response Info) Info {
 			logo, existsLogo := s.Attr("href")
 			if existsLogo {
 				response.Logo = logo
+				return
 			}
 		}
 
@@ -352,6 +462,7 @@ func searchInfo(domain string, response Info) Info {
 				logo, existsLogo := s.Attr("href")
 				if existsLogo {
 					response.Logo = logo
+					return
 				}
 			}
 		}
@@ -366,13 +477,14 @@ func searchInfo(domain string, response Info) Info {
 	}
 
 	if _, err := db.Query(
-		"INSERT INTO serverInfo (domain, servers_changed, ssl_grade, previous_ssl_grade, logo, title, is_down, created, id ) "+
-			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ",
-		domain, false, response.SSLGrade, response.SSLGrade, response.Logo, response.Title, response.IsDown, time.Now(), id); err != nil {
+		"INSERT INTO serverInfo (domain, ssl_grade, logo, title, is_down, created, id ) "+
+			"VALUES ($1, $2, $3, $4, $5, $6, $7) ",
+		domain, response.SSLGrade, response.Logo, response.Title, response.IsDown, time.Now(), id); err != nil {
 		log.Fatal(err)
 	}
 
-	for _, element := range servers {
+	for _, element := range serverIDs {
+		log.Print("id insert ", element)
 
 		if err != nil {
 			log.Print(err)
@@ -380,7 +492,7 @@ func searchInfo(domain string, response Info) Info {
 		if _, err := db.Query(
 			"INSERT INTO servers_info (id, info_id, server_id ) "+
 				"VALUES (DEFAULT, $1, $2) ",
-			id, element.Id); err != nil {
+			id, element); err != nil {
 			log.Fatal(err)
 		}
 	}
