@@ -55,7 +55,7 @@ type Server struct {
 }
 
 type Message struct {
-	message string `json:"message"`
+	Message string `json:"message"`
 }
 
 func init() {
@@ -153,13 +153,12 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 
 	if !matched {
 		var er Message
-		er.message = "Please insert a valid domain"
+		er.Message = "Please insert a valid domain"
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(er)
 		return
 	}
 
-	log.Print("fuck")
 	row := db.QueryRow(
 		"SELECT id, servers_changed, ssl_grade, previous_ssl_grade, logo, title, is_down, created_at, updated_at FROM serverInfo WHERE domain=$1 ", domain)
 
@@ -176,10 +175,10 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 
 	if err := row.Scan(&id, &serversChangedDB, &sslGradeDB, &previousSslGradeDB, &logo, &title, &isDownDB, &createdAtDB, &updatedAtDB); err != nil {
 		response = searchInfo(domain, response)
-
+		log.Print(response.Servers)
 		if response.Servers == nil {
 			var err Message
-			err.message = "Could not check for servers information right now. Try Again later."
+			err.Message = "Could not check for servers information right now. Try Again later."
 			w.WriteHeader(http.StatusNoContent)
 			json.NewEncoder(w).Encode(err)
 			return
@@ -220,7 +219,7 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 
 		if timePassed.Hours() >= 1 {
 			serversSSL, _, sslGrade := lookUpServersSSL(domain)
-
+			log.Print(serversSSL)
 			if serversSSL != nil {
 				if !strings.EqualFold(sslGrade, sslGradeDB) {
 					response.ServersChanged = true
@@ -238,7 +237,7 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				var err Message
-				err.message = "Could not check if servers changed right now. Try again later"
+				err.Message = "Could not check if servers changed right now. Try again later"
 				w.WriteHeader(http.StatusNoContent)
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(err)
@@ -272,7 +271,9 @@ func searchInfo(domain string, response Info) Info {
 	response.IsDown = isDown
 	response.Created = time.Now()
 
-	persistInfo(domain, response, serverIDs)
+	if servers != nil {
+		persistInfo(domain, response, serverIDs)
+	}
 
 	return response
 }
@@ -574,38 +575,12 @@ func persistServerInfo(server Server) uuid.UUID {
 
 func updateServerInfo(servers []Server, ids []uuid.UUID) {
 
-	if len(servers) > len(ids) {
-		for i, id := range ids {
-			server := servers[i]
+	for _, id := range ids {
+		for _, server := range servers {
 			if _, err := db.Query(
 				"UPDATE servers SET (ipAddress, ssl_grade, country, owner) = "+
 					" ($1, $2, $3, $4) WHERE id = $5",
 				server.Address, server.SSLGrade, server.Country, server.Owner, id); err != nil {
-				log.Fatal(err)
-			}
-			if i > len(ids) {
-				break
-			}
-		}
-	} else if len(servers) < len(ids) {
-		for i, server := range servers {
-
-			if _, err := db.Query(
-				"UPDATE servers SET (ipAddress, ssl_grade, country, owner) = "+
-					" ($1, $2, $3, $4) WHERE id = $5",
-				server.Address, server.SSLGrade, server.Country, server.Owner, ids[i]); err != nil {
-				log.Fatal(err)
-			}
-			if i > len(servers) {
-				break
-			}
-		}
-	} else {
-		for i, server := range servers {
-			if _, err := db.Query(
-				"UPDATE servers SET (ipAddress, ssl_grade, country, owner) = "+
-					" ($1, $2, $3, $4) WHERE id = $5",
-				server.Address, server.SSLGrade, server.Country, server.Owner, ids[i]); err != nil {
 				log.Fatal(err)
 			}
 		}
