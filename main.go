@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,6 +22,8 @@ import (
 
 var router *chi.Mux
 var db *sql.DB
+
+const validDomain = "^(?:[_a-z0-9](?:[_a-z0-9-]{0,61}[a-z0-9])?\\.)+(?:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)?$"
 
 // Post type details
 type Items struct {
@@ -49,6 +52,10 @@ type Server struct {
 	SSLGrade string `json:"ssl_grade"`
 	Country  string `json:"country"`
 	Owner    string `json:"owner"`
+}
+
+type Message struct {
+	message string `json:"message"`
 }
 
 func init() {
@@ -129,7 +136,6 @@ func AllServers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Items = allInfo
-	w.WriteHeader(http.StatusCreated)
 
 	json.NewEncoder(w).Encode(response)
 }
@@ -139,6 +145,21 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 
 	domain := chi.URLParam(r, "domain")
 
+	matched, err := regexp.MatchString(validDomain, domain)
+
+	if err != nil {
+		log.Print(err)
+	}
+
+	if !matched {
+		var er Message
+		er.message = "Please insert a valid domain"
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(er)
+		return
+	}
+
+	log.Print("fuck")
 	row := db.QueryRow(
 		"SELECT id, servers_changed, ssl_grade, previous_ssl_grade, logo, title, is_down, created_at, updated_at FROM serverInfo WHERE domain=$1 ", domain)
 
@@ -155,6 +176,14 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 
 	if err := row.Scan(&id, &serversChangedDB, &sslGradeDB, &previousSslGradeDB, &logo, &title, &isDownDB, &createdAtDB, &updatedAtDB); err != nil {
 		response = searchInfo(domain, response)
+
+		if response.Servers == nil {
+			var err Message
+			err.message = "Could not check for servers information right now. Try Again later."
+			w.WriteHeader(http.StatusNoContent)
+			json.NewEncoder(w).Encode(err)
+			return
+		}
 	} else {
 
 		response.SSLGrade = sslGradeDB
@@ -192,19 +221,28 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 		if timePassed.Hours() >= 1 {
 			serversSSL, _, sslGrade := lookUpServersSSL(domain)
 
-			if !strings.EqualFold(sslGrade, sslGradeDB) {
-				response.ServersChanged = true
-				response.PreviousSSLGrade = sslGradeDB
-				response.SSLGrade = sslGrade
-				response.Servers = serversSSL
+			if serversSSL != nil {
+				if !strings.EqualFold(sslGrade, sslGradeDB) {
+					response.ServersChanged = true
+					response.PreviousSSLGrade = sslGradeDB
+					response.SSLGrade = sslGrade
+					response.Servers = serversSSL
 
-				updateServerInfo(serversSSL, serverIDs)
-				updateInfo(response, id)
-			} else {
-				if response.ServersChanged {
-					response.ServersChanged = false
+					updateServerInfo(serversSSL, serverIDs)
 					updateInfo(response, id)
+				} else {
+					if response.ServersChanged {
+						response.ServersChanged = false
+						updateInfo(response, id)
+					}
 				}
+			} else {
+				var err Message
+				err.message = "Could not check if servers changed right now. Try again later"
+				w.WriteHeader(http.StatusNoContent)
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(err)
+				return
 			}
 
 		}
@@ -218,7 +256,7 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	routers()
-	http.ListenAndServe(":8005", Logger())
+	http.ListenAndServe("0.0.0.0:8005", Logger())
 }
 
 func searchInfo(domain string, response Info) Info {
@@ -256,76 +294,81 @@ func lookUpServersSSL(domain string) ([]Server, []uuid.UUID, string) {
 	var masnun map[string]interface{}
 	json.Unmarshal(body, &masnun)
 
-	status := masnun["status"].(string)
+	errors := masnun["errors"]
 
-	for !strings.EqualFold(status, "READY") {
-		resp, err = http.Get(req)
-		if err != nil {
-			// handle error
-		}
-		defer resp.Body.Close()
+	if errors != nil {
+		status := masnun["status"].(string)
 
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		json.Unmarshal(body, &masnun)
-
-		status = masnun["status"].(string)
-	}
-
-	var endpoints []interface{}
-	endpoints = masnun["endpoints"].([]interface{})
-
-	servers := make([]Server, len(endpoints))
-	serverIDs := make([]uuid.UUID, 0)
-
-	sslGrade := "A+"
-
-	for i := 0; i < len(endpoints); i++ {
-		statusMessage := endpoints[i].(map[string]interface{})["statusMessage"].(string)
-
-		for !strings.EqualFold(statusMessage, "Ready") {
+		for !strings.EqualFold(status, "READY") {
 			resp, err = http.Get(req)
 			if err != nil {
 				// handle error
 			}
 			defer resp.Body.Close()
 
-			body, err = ioutil.ReadAll(resp.Body)
+			body, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
 				log.Fatalln(err)
 			}
 
 			json.Unmarshal(body, &masnun)
 
-			statusMessage = endpoints[i].(map[string]interface{})["statusMessage"].(string)
+			status = masnun["status"].(string)
 		}
 
-		grade := endpoints[i].(map[string]interface{})["grade"]
-		ipAddress := endpoints[i].(map[string]interface{})["ipAddress"]
+		var endpoints []interface{}
+		endpoints = masnun["endpoints"].([]interface{})
 
-		if (strings.EqualFold(sslGrade, "A+") && strings.Compare(grade.(string), sslGrade) < 0) ||
-			(strings.Compare(grade.(string), sslGrade) > 0) {
-			sslGrade = grade.(string)
+		servers := make([]Server, len(endpoints))
+		serverIDs := make([]uuid.UUID, 0)
+
+		sslGrade := "A+"
+
+		for i := 0; i < len(endpoints); i++ {
+			statusMessage := endpoints[i].(map[string]interface{})["statusMessage"].(string)
+
+			for !strings.EqualFold(statusMessage, "Ready") {
+				resp, err = http.Get(req)
+				if err != nil {
+					// handle error
+				}
+				defer resp.Body.Close()
+
+				body, err = ioutil.ReadAll(resp.Body)
+				if err != nil {
+					log.Fatalln(err)
+				}
+
+				json.Unmarshal(body, &masnun)
+
+				statusMessage = endpoints[i].(map[string]interface{})["statusMessage"].(string)
+			}
+
+			grade := endpoints[i].(map[string]interface{})["grade"]
+			ipAddress := endpoints[i].(map[string]interface{})["ipAddress"]
+
+			if (strings.EqualFold(sslGrade, "A+") && strings.Compare(grade.(string), sslGrade) < 0) ||
+				(strings.Compare(grade.(string), sslGrade) > 0) {
+				sslGrade = grade.(string)
+			}
+
+			owner, country := lookUpWhoisInfo(ipAddress.(string))
+
+			server := Server{
+				Address:  ipAddress.(string),
+				SSLGrade: grade.(string),
+				Owner:    owner,
+				Country:  country,
+			}
+
+			serverIDs = append(serverIDs, persistServerInfo(server))
+
+			servers[i] = server
 		}
-
-		owner, country := lookUpWhoisInfo(ipAddress.(string))
-
-		server := Server{
-			Address:  ipAddress.(string),
-			SSLGrade: grade.(string),
-			Owner:    owner,
-			Country:  country,
-		}
-
-		serverIDs = append(serverIDs, persistServerInfo(server))
-
-		servers[i] = server
+		return servers, serverIDs, sslGrade
+	} else {
+		return nil, nil, ""
 	}
-
-	return servers, serverIDs, sslGrade
 }
 
 func lookUpServersDB(id uuid.UUID) ([]Server, []uuid.UUID) {
