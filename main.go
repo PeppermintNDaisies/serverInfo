@@ -256,7 +256,7 @@ func GetServerInfo(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	routers()
-	http.ListenAndServe("0.0.0.0:8005", Logger())
+	http.ListenAndServe(":8005", Logger())
 }
 
 func searchInfo(domain string, response Info) Info {
