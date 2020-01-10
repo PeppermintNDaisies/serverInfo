@@ -1,4 +1,4 @@
-Server Info Query
+# Server Info Query
 Prueba presentada a Truora
 
 ## Contenido:
