@@ -263,6 +263,8 @@ func searchInfo(domain string, response Info) Info {
 
 	title, logo, isDown := lookUpWebInfo(domain)
 	servers, serverIDs, sslGrade := lookUpServersSSL(domain)
+	log.Print(len(servers))
+	log.Print("sns")
 
 	response.Servers = servers
 	response.SSLGrade = sslGrade
@@ -295,10 +297,10 @@ func lookUpServersSSL(domain string) ([]Server, []uuid.UUID, string) {
 	var masnun map[string]interface{}
 	json.Unmarshal(body, &masnun)
 
-	errors := masnun["errors"]
+	statusField := masnun["status"]
 
-	if errors != nil {
-		status := masnun["status"].(string)
+	if statusField == nil {
+		status := statusField.(string)
 
 		for !strings.EqualFold(status, "READY") {
 			resp, err = http.Get(req)
