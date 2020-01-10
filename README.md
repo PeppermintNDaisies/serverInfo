@@ -26,22 +26,24 @@ Antes de realizar la consulta del dominio, se revisa que éste sea válido media
 
 ## Documentación de la API
 1. http://192.34.63.138:8005/serverinfo/${domain}
-{
-	“servers”:[
-		{
-			“address”: “ipAddress”,
-			“ssl_grade”: “A+”,
-			“country”: “US”,
-			“owner”:  “Amazon, Inc.”
-		}
-	],
-	“servers_changed”: false,
-	“ssl_grade”: “A+”,
-	“previous_ssl_grade”: “”,
-	“logo”: ”https://example.com/logo”,
-	“title”: “Title”,
-	“is_down”: false
-}
+
+## 
+	{
+        “servers”:[
+            {
+                “address”: “ipAddress”,
+                “ssl_grade”: “A+”,
+                “country”: “US”,
+                “owner”:  “Amazon, Inc.”
+            }
+        ],
+        “servers_changed”: false,
+        “ssl_grade”: “A+”,
+        “previous_ssl_grade”: “”,
+        “logo”: ”https://example.com/logo”,
+        “title”: “Title”,
+        “is_down”: false
+    }
 
 * *Servers*:
 	* *address*: dirección IP obtenida del llamado a la api de SSL Labs.
@@ -56,43 +58,43 @@ Antes de realizar la consulta del dominio, se revisa que éste sea válido media
 * *is_down*: Se realiza un llamado a la página web del dominio ingresado y se revisa el http status de la respuesta, si este es ` 503 Service Unavailable` este campo es true.
 
 2. http://192.34.63.138:8005/servers
-## {
-	“items”: [
-	{ “domain”: “example.com”, 
-	  “info”: 
-		{
-		“servers”:[
-			{
-				“address”: “ipAddress”,
-				“ssl_grade”: “A+”,
-				“country”: “US”,
-				“owner”:  “Amazon, Inc.”
-			}
-		],
-			“servers_changed”: false,
-			“ssl_grade”: “A+”,
-			“previous_ssl_grade”: “”,
-			“logo”: ”https://example.com/logo”,
-			“title”: “Title”,
-			“is_down”: false
-		}
-	]
-}
+## 
+    { “items”: [
+        { “domain”: “example.com”, 
+        “info”: 
+            {
+            “servers”:[
+                {
+                    “address”: “ipAddress”,
+                    “ssl_grade”: “A+”,
+                    “country”: “US”,
+                    “owner”:  “Amazon, Inc.”
+                }
+            ],
+                “servers_changed”: false,
+                “ssl_grade”: “A+”,
+                “previous_ssl_grade”: “”,
+                “logo”: ”https://example.com/logo”,
+                “title”: “Title”,
+                “is_down”: false
+            }
+        ]
+    }
 
 ## Diagrama de Despliegue
 
-![](/images/UMLDeploymentDiagram.png)
+![](https://raw.githubusercontent.com/PeppermintNDaisies/serverInfo/master/images/UMLDeploymentDiagram.png?token=AGTNIHHINUM4FL2JSI4KSTK6EEHKO)
 
 ## Diagrama de Modelo de Datos
-![](/images/DataModel.png)
+![](https://raw.githubusercontent.com/PeppermintNDaisies/serverInfo/master/images/DataModel.png?token=AGTNIHH7LXBBK3UPQQG76TS6EEHHG)
 
 
 ## Diseño de Prototipo Digital
 Pantalla principal
-![](/images/app1.png)
+![](https://raw.githubusercontent.com/PeppermintNDaisies/serverInfo/master/images/app1.png?token=AGTNIHFICSLFUUNBFSQZYDC6EEHMG)
 
 Revisión del dominio ingresado por el usuario
-![](/images/app2.png)
+![](https://raw.githubusercontent.com/PeppermintNDaisies/serverInfo/master/images/app2.png?token=AGTNIHCS2POUGAV2EMAJEV26EEHMO)
 
 
 
