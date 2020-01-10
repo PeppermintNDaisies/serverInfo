@@ -81,18 +81,18 @@ Antes de realizar la consulta del dominio, se revisa que éste sea válido media
 
 ## Diagrama de Despliegue
 
-[image:C0FF373F-A49F-4EB6-A678-EB7C5D64AF7A-21327-00001B239F29333F/UML Deployment Diagram - Higher Level UML Deployment Diagram.png]
+![](/images/UMLDeploymentDiagram.png)
 
 ## Diagrama de Modelo de Datos
-[image:4D416B0E-8DFA-4B8D-AA63-EBB589F07822-21327-00001B40F8D5E683/Screen Shot 2020-01-09 at 18.22.58.png]
+![](/images/DataModel.png)
 
 
 ## Diseño de Prototipo Digital
 Pantalla principal
-[image:A07147B6-5278-4075-AAC3-6311A4C23224-21327-000015A11D323251/app1.png]
+![](/images/app1.png)
 
 Revisión del dominio ingresado por el usuario
-[image:3DA96AD7-DB4E-4F22-B0DA-FC2A3CE90D61-21327-000016375FE4917A/app2.png]
+![](/images/app2.png)
 
 
 
